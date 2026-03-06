@@ -1,0 +1,130 @@
+s3:
+  bucket: ${S3_BUCKET} 
+  prefix: runs
+registry:
+  name: Auto_ML_Models_v3
+project_name: Auto_ML_03
+experiment_name: Experiment_03
+task_type: classification
+target: delete_ind
+positive_label: '1'
+id_columns:
+- _hoodie_commit_time
+- _hoodie_commit_seqno
+- _hoodie_record_key
+- _hoodie_partition_path
+- _hoodie_file_name
+- member_assignment_id
+- member_id
+timestamp_columns:
+- start_date
+- end_date
+- create_timestamp
+- modify_timestamp
+exclude_columns:
+- _hoodie_commit_time
+- _hoodie_commit_seqno
+- _hoodie_record_key
+- _hoodie_partition_path
+- _hoodie_file_name
+- site_id
+- assignment_type_unscrubbed
+- assignment_type
+- scrubbed
+- created_by
+- modified_by
+- loaded_from_file
+- exportcategory
+split:
+  strategy: stratified
+  train_size: 0.7
+  validation_size: 0.15
+  test_size: 0.15
+  random_state: 42
+  stratify_column: delete_ind
+metrics:
+  primary: pr_auc
+  secondary:
+  - roc_auc
+  - f1
+  - precision
+  - recall
+  - balanced_accuracy
+  - log_loss
+  - average_precision
+  classification_threshold: 0.5
+  use_class_weights: true
+feature_engineering:
+  datetime_features:
+    enabled: true
+    columns:
+    - start_date
+    - end_date
+    - create_timestamp
+    - modify_timestamp
+    extract:
+    - year
+    - month
+    - day
+    - dayofweek
+    - quarter
+  derived_features:
+  - name: assignment_duration_days
+    type: date_diff
+    start_column: start_date
+    end_column: end_date
+    unit: days
+  - name: days_since_creation
+    type: date_diff
+    start_column: create_timestamp
+    end_column: modify_timestamp
+    unit: days
+  categorical_encoding:
+    strategy: auto
+    high_cardinality_threshold: 50
+    high_cardinality_method: target_encoding
+    low_cardinality_method: onehot
+  missing_value_strategy:
+    numeric: median
+    categorical: mode
+    create_missing_indicators: true
+preprocessing:
+  numeric_scaling:
+    method: standard
+  outlier_handling:
+    enabled: true
+    method: clip
+    lower_percentile: 1
+    upper_percentile: 99
+  remove_constant_features: true
+  remove_correlated_features:
+    enabled: true
+    threshold: 0.95
+imbalance_handling:
+  enabled: true
+  strategy: smote
+  alternatives:
+  - class_weight
+  - random_oversample
+  - random_undersample
+  - smoteenn
+  sampling_ratio: 0.3
+hpo:
+  enabled: true
+  framework: optuna
+  search_strategy: tpe
+  n_trials: 100
+  timeout_seconds: 7200
+  early_stopping:
+    enabled: true
+    patience: 20
+    min_delta: 0.001
+  cv_folds: 5
+  cv_strategy: stratified
+  n_jobs: -1
+  pruning:
+    enabled: true
+    pruner: median
+    n_startup_trials: 10
+    n_warmup_steps: 5
+models: null

@@ -1,0 +1,8 @@
+# Rules consumed by plan-step (Step 2). Safe defaults; tweak anytime.
+thresholds:
+  high_cardinality_unique_ratio: 0.5   # >50% unique → treat as high-card cat
+  imbalance_ratio: 3.0                 # major/minor >= 3 → imbalanced
+
+min_recall: 0.6                        # threshold tuning constraint for binary tasks
+time_aware_split_min_days: 180         # if timestamp coverage >= this → suggest temporal split
+allow_text: false                      # set true to enable tfidf pipeline for text cols

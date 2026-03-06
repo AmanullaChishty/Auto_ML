@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ project_name }} — Run Report</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; }
+    th { background: #f7f7f7; }
+    td:first-child, th:first-child { text-align: left; }
+    .pill { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background: #e6ffed; color: #046a38; border: 1px solid #bde5c8; }
+    .warn { background: #fff5e6; color: #8a4b00; border: 1px solid #f5d49a; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #eee; border-radius: 12px; padding: 16px; }
+    img { max-width: 100%; height: auto; border: 1px solid #eee; border-radius: 8px; }
+    .small { color: #666; font-size: 12px; }
+    .hide { display:none; }
+  </style>
+</head>
+<body>
+  <h1>{{ project_name }} — Run Report</h1>
+
+  <p><b>Dataset:</b> {{ dataset_uri }} &nbsp;|&nbsp; <b>Target:</b> {{ target }}</p>
+  <p class="small">MLflow: experiment <b>{{ mlflow_experiment }}</b>, run <code>{{ mlflow_run_id }}</code></p>
+
+  <h2>Leaderboard (test) — sorted by {{ primary_metric|upper }}</h2>
+  <table>
+    <tr>
+      <th>Model</th>
+      <th>AUPRC</th>
+      <th>AUROC</th>
+      <th>Precision</th>
+      <th>Recall</th>
+      <th>F1</th>
+      <th>Threshold</th>
+    </tr>
+    {% for row in leaderboard %}
+    <tr>
+      <td>{{ row.name }}</td>
+      <td>{{ '%.4f'|format(row.auprc) if row.auprc is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(row.auroc) if row.auroc is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(row.precision) if row.precision is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(row.recall) if row.recall is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(row.f1) if row.f1 is not none else 'NA' }}</td>
+      <td>{{ '%.3f'|format(row.threshold) if row.threshold is defined else '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <h2>Selected</h2>
+  <p><b>{{ selected.name }}</b> — registered as <b>{{ registry.model_name }}</b> v<b>{{ registry.model_version }}</b></p>
+  <p>
+    Decision threshold: <b>{{ '%.3f'|format(used_threshold) }}</b>
+    &nbsp;|&nbsp; Min recall constraint: <b>{{ '%.3f'|format(min_recall) }}</b>
+    {% if constraint_violated is not none %}
+      &nbsp;|&nbsp;
+      {% if not constraint_violated %}
+        <span class="pill ok">constraint met</span>
+      {% else %}
+        <span class="pill warn">constraint not met</span>
+      {% endif %}
+    {% endif %}
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Test PR Curve</h3>
+      {% if pr_png_uri %}
+        <img id="pr-img" data-src="{{ pr_png_uri }}" alt="PR Curve" onerror="this.nextElementSibling.classList.remove('hide'); this.classList.add('hide');">
+        <p class="small hide">Couldn’t load PR curve image (check S3 permissions or URL).</p>
+      {% else %}
+        <p class="small">No PR curve artifact found.</p>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h3>Confusion Matrix @ threshold {{ '%.3f'|format(used_threshold) }}</h3>
+      {% if cm_png_uri %}
+        <img id="cm-img" data-src="{{ cm_png_uri }}" alt="Confusion Matrix" onerror="this.nextElementSibling.classList.remove('hide'); this.classList.add('hide');">
+        <p class="small hide">Couldn’t load confusion matrix image (check S3 permissions or URL).</p>
+      {% else %}
+        {% if confusion %}
+          <pre>{{ confusion | tojson(indent=2) }}</pre>
+        {% else %}
+          <p class="small">No confusion matrix artifact found.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+  </div>
+
+  <p class="small">This report is generated from the AI plan’s evaluation settings (primary metric: {{ primary_metric }}).</p>
+
+  <script>
+    (function () {
+      function inferRegionFromBucket(bucket) {
+        // Try to infer region from bucket suffix like "-us-east-1"
+        const m = bucket.match(/-(us|ap|eu|sa|ca|me|af|il|cn)-(north|south|east|west|central|southeast|northeast|southwest|northwest)-\d+$/);
+        return m ? m[0].slice(1) : "us-east-1";
+      }
+      function s3ToHttps(uri) {
+        if (!uri) return null;
+        if (/^https?:\/\//i.test(uri)) return uri;
+        if (!/^s3:\/\//i.test(uri)) return null;
+        const withoutScheme = uri.slice(5); // drop "s3://"
+        const firstSlash = withoutScheme.indexOf("/");
+        if (firstSlash < 0) return null;
+        const bucket = withoutScheme.slice(0, firstSlash);
+        const key = withoutScheme.slice(firstSlash + 1);
+        const region = inferRegionFromBucket(bucket);
+        return `https://${bucket}.s3.${region}.amazonaws.com/${encodeURI(key)}`;
+      }
+      document.querySelectorAll("img[data-src]").forEach(img => {
+        const u = img.getAttribute("data-src");
+        const httpsUrl = s3ToHttps(u);
+        if (httpsUrl) img.src = httpsUrl;
+      });
+    })();
+  </script>
+
+  <noscript>
+    <p class="small">Images are hosted on S3; enable JavaScript to rewrite <code>s3://</code> URLs to HTTPS.</p>
+  </noscript>
+</body>
+</html>

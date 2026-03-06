@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>{{ project_name }} — Model Card</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }
+    h2 { margin-top: 24px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .card { border: 1px solid #eee; border-radius: 12px; padding: 16px; }
+    table { border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 6px 10px; text-align: right; }
+    th { background: #f7f7f7; }
+    td:first-child, th:first-child { text-align: left; }
+    img { max-width: 100%; height: auto; border: 1px solid #eee; border-radius: 8px; }
+    .small { color: #666; font-size: 12px; }
+    .hide { display: none; }
+    code { word-break: break-all; }
+  </style>
+</head>
+<body>
+  <h1>{{ project_name }} — Model Card</h1>
+
+  <h2>Model & Registry</h2>
+  <p><b>Model:</b> {{ model_name }} &nbsp;|&nbsp; <b>Registry:</b> {{ registry.model_name }} v{{ registry.model_version }}</p>
+  <p class="small">MLflow: experiment <b>{{ mlflow_experiment }}</b>, run <code>{{ mlflow_run_id }}</code></p>
+
+  <h2>Task</h2>
+  <p><b>Target:</b> {{ target }}</p>
+
+  <h2>Test Metrics</h2>
+  <table>
+    <tr>
+      <th>Primary</th><th>AUPRC</th><th>AUROC</th><th>Precision</th><th>Recall</th><th>F1</th>
+    </tr>
+    <tr>
+      <td>{{ primary_metric|upper }}</td>
+      <td>{{ '%.4f'|format(metrics.auprc) if metrics.auprc is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(metrics.auroc) if metrics.auroc is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(metrics.precision) if metrics.precision is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(metrics.recall) if metrics.recall is not none else 'NA' }}</td>
+      <td>{{ '%.4f'|format(metrics.f1) if metrics.f1 is not none else 'NA' }}</td>
+    </tr>
+  </table>
+
+  <h2>Operating Point</h2>
+  <p>Decision threshold: <b>{{ '%.3f'|format(used_threshold) }}</b> &nbsp;|&nbsp;
+     Min recall constraint: <b>{{ '%.3f'|format(min_recall) }}</b>
+     {% if constraint_violated is not none %}&nbsp;|&nbsp;
+       {% if not constraint_violated %}<b>constraint met</b>{% else %}<b>constraint not met</b>{% endif %}
+     {% endif %}
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Test PR Curve</h3>
+      {% if pr_png_uri %}
+        <img id="pr-img" data-src="{{ pr_png_uri }}" alt="PR Curve">
+        <p id="pr-msg" class="small hide"></p>
+      {% else %}
+        <p class="small">No PR curve artifact found.</p>
+      {% endif %}
+    </div>
+    <div class="card">
+      <h3>Confusion Matrix @ threshold {{ '%.3f'|format(used_threshold) }}</h3>
+      {% if cm_png_uri %}
+        <img id="cm-img" data-src="{{ cm_png_uri }}" alt="Confusion Matrix">
+        <p id="cm-msg" class="small hide"></p>
+      {% else %}
+        <p class="small">No confusion matrix artifact found.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if selection_meta %}
+  <h2>Selection Policy</h2>
+  <pre class="small">{{ selection_meta | tojson(indent=2) }}</pre>
+  {% endif %}
+
+  <p class="small">This model card summarizes the selected model and its operating point as determined by the AI plan.</p>
+
+  <script>
+  (function () {
+    function parseS3(uri) {
+      const s = uri.slice(5); // drop "s3://"
+      const i = s.indexOf("/");
+      if (i < 0) return null;
+      return { bucket: s.slice(0, i), key: s.slice(i + 1) };
+    }
+    function inferRegion(bucket) {
+      const m = bucket.match(/-(us|ap|eu|sa|ca|me|af|il)-(north|south|east|west|central|southeast|northeast|southwest|northwest)-\d+$/);
+      return m ? m[0].slice(1) : "us-east-1";
+    }
+    function candidatesFromS3(uri) {
+      if (!/^s3:\/\//i.test(uri)) return [uri]; // already https or something else
+      const p = parseS3(uri);
+      if (!p) return [];
+      const { bucket, key } = p;
+      const region = inferRegion(bucket);
+      const encKey = encodeURI(key);
+      const urls = [];
+      // Prefer HTTPS only
+      if (bucket.includes(".")) {
+        // path-style when bucket has dots (TLS wildcard issues)
+        urls.push(`https://s3.${region}.amazonaws.com/${bucket}/${encKey}`);
+        urls.push(`https://s3.amazonaws.com/${bucket}/${encKey}`);
+      } else {
+        // virtual-hosted style
+        urls.push(`https://${bucket}.s3.${region}.amazonaws.com/${encKey}`);
+        urls.push(`https://${bucket}.s3.amazonaws.com/${encKey}`); // esp. us-east-1
+        // path-style fallbacks
+        urls.push(`https://s3.${region}.amazonaws.com/${bucket}/${encKey}`);
+        urls.push(`https://s3.amazonaws.com/${bucket}/${encKey}`);
+      }
+      return urls;
+    }
+    function tryLoad(img, urls, msgEl) {
+      if (!urls.length) {
+        msgEl?.classList.remove("hide");
+        msgEl && (msgEl.innerHTML = `Couldn’t load image. Provide a public or pre-signed HTTPS URL.`);
+        return;
+      }
+      const u = urls.shift();
+      img.onload = function () { msgEl?.classList.add("hide"); };
+      img.onerror = function () {
+        if (!urls.length) {
+          msgEl?.classList.remove("hide");
+          msgEl && (msgEl.innerHTML = `Couldn’t load image. Last HTTPS tried: <code>${u}</code>`);
+        } else {
+          tryLoad(img, urls, msgEl);
+        }
+      };
+      img.src = u;
+    }
+    document.querySelectorAll("img[data-src]").forEach(img => {
+      const raw = img.getAttribute("data-src");
+      const msg = document.getElementById(img.id.replace("-img", "-msg"));
+      tryLoad(img, candidatesFromS3(raw), msg);
+    });
+  })();
+</script>
+
+
+  <noscript>
+    <p class="small">Images are on S3; enable JavaScript or pass pre-signed HTTPS URLs.</p>
+  </noscript>
+</body>
+</html>

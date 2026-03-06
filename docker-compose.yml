@@ -1,0 +1,54 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    ports: ["5432:5432"]
+    healthcheck: { test: ["CMD", "pg_isready", "-U", "mlflow"], interval: 5s, timeout: 5s, retries: 10 }
+    volumes: [ "pgdata:/var/lib/postgresql/data" ]
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.mlflow
+    environment:
+      MLFLOW_BACKEND_STORE_URI: postgresql+psycopg2://mlflow:mlflow@postgres:5432/mlflow
+      MLFLOW_ARTIFACT_ROOT: ${MLFLOW_S3_BUCKET}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION}
+      MLFLOW_TRACKING_SERVER_ALLOWED_HOSTS: "mlflow,localhost,127.0.0.1"
+      MLFLOW_TRACKING_SERVER_ALLOWED_ORIGINS: "*"
+      MLFLOW_TRACKING_SERVER_ALLOWED_HOSTS_REGEX: "^localhost(:[0-9]+)?$|^127\\.0\\.0\\.1(:[0-9]+)?$|^mlflow(:[0-9]+)?$"
+      GUNICORN_CMD_ARGS: "--forwarded-allow-ips='*' --bind 0.0.0.0:5000"
+    ports: ["5000:5000"]
+    depends_on: [postgres]
+
+  runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runner
+    env_file: [.env]
+    volumes: [ ".:/app" ]
+    depends_on: [mlflow]
+    command: ["sleep","infinity"]
+
+  orchestrator:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.orchestrator
+    environment:
+      SF_OCSP_MODE: INSECURE
+      NO_PROXY: .snowflakecomputing.com,.amazonaws.com
+      REQUESTS_CA_BUNDLE: /etc/ssl/certs/ca-certificates.crt
+      SSL_CERT_DIR: /etc/ssl/certs
+    env_file: [.env]
+    volumes: [ ".:/app" ]
+    depends_on: [runner, mlflow]
+    command: ["sleep","infinity"]
+
+volumes:
+  pgdata:
